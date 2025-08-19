@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="hi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Simple WhatsApp Bulk Helper</title>
+  <style>
+    body{font-family:Segoe UI,Roboto,Arial;margin:18px;background:#f7f9fc;color:#111}
+    .card{background:#fff;border-radius:10px;padding:18px;box-shadow:0 6px 18px rgba(20,30,60,0.06);max-width:900px;margin:auto}
+    textarea,input,button{font-size:15px;padding:10px;border-radius:8px;border:1px solid #d7e0ef;width:100%;box-sizing:border-box}
+    label{font-weight:600;margin-top:8px;display:block}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .muted{color:#556677;font-size:13px}
+    .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+    .danger{background:#ffecec;border:1px solid #ffb3b3;padding:10px;border-radius:8px}
+    .small{font-size:13px}
+    .link-list{max-height:220px;overflow:auto;background:#fafbff;padding:8px;border-radius:6px}
+    @media(max-width:720px){.row{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>WhatsApp Bulk Helper — आसान वेबसाइट (स्थानीय उपयोग के लिए)</h2>
+    <p class="muted">यह टूल आपको <strong>WhatsApp Web</strong> के लिए व्यक्तिगत wa.me लिंक बनाने और उन्हें कॉपी/डाउनलोड करने में मदद करेगा। बड़े पैमाने पर संदेश भेजने के लिए <em>WhatsApp Business API</em> का प्रयोग सुरक्षित और वैध तरीका है — नीचे चेतावनी देखें।</p>
+
+    <div class="danger small">
+      <strong>महत्वपूर्ण चेतावनी:</strong>
+      <ul>
+        <li>WhatsApp पर बिना अनुमति वाले bulk messages भेजना स्पैम माना जा सकता है और आपका नंबर ब्लॉक हो सकता है।</li>
+        <li>बड़ी मात्रा में संदेशों के लिए आधिकारिक <em>WhatsApp Business API</em> या WhatsApp-approved providers का उपयोग करें।</li>
+        <li>नीचे दिए गए टूल से भेजना पूरी तरह आपकी जिम्मेदारी है — सावधानी से उपयोग करें।</li>
+      </ul>
+    </div>
+
+    <label>फोन नंबर (प्रत्येक नंबर नई लाइन में) — यदि Indian 10 अंकों के नंबर हैं, तो वह +91 मान लिया जाएगा:</label>
+    <textarea id="numbers" rows="6" placeholder="9876543210
+919876543210
++919876543210"></textarea>
+
+    <div class="row" style="margin-top:12px;">
+      <div>
+        <label>संदेश (URL-safe टेक्स्ट बन जाएगा)</label>
+        <textarea id="message" rows="4" placeholder="नमस्ते! यह एक संदेश है"></textarea>
+        <div class="muted small">तालिका/नाम जोड़ने के लिए प्लेसहोल्डर जैसे {name} डालें — फिलहाल ऐसा विन्‍योजन लोकल नहीं करेगा।</div>
+      </div>
+
+      <div>
+        <label>CSV फ़ाइल अपलोड (optional) — केवल एक कॉलम में नंबर होने चाहिये</label>
+        <input type="file" id="file" accept=".csv" />
+        <div class="muted small" style="margin-top:8px;">CSV से नंबर निकालकर textarea में जोड़ा जा सकता है।</div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="parseBtn">नंबर पार्स करें</button>
+      <button id="generateBtn">wa.me लिंक बनाओ</button>
+      <button id="copyBtn">सभी लिंक कॉपी करो</button>
+      <button id="downloadBtn">CSV डाउनलोड करो</button>
+      <button id="openAllBtn">सभी लिंक खोलो (जोखिम है)</button>
+    </div>
+
+    <div style="margin-top:12px">
+      <label>बनाए गए लिंक</label>
+      <div id="links" class="link-list small"></div>
+    </div>
+
+    <div style="margin-top:12px" class="muted small">संख्या साफ-सफाई: गैर-अंकीय वर्ण हटाये जाते हैं। 10 अंकों वाले Indian नंबरों पर +91 जोड़ा जाएगा।</div>
+  </div>
+
+  <script>
+    function sanitizeNumber(s){
+      if(!s) return null;
+      s = String(s).trim();
+      // remove plus and spaces and non-digits except leading +
+      let digits = s.replace(/[^0-9]/g,'');
+      if(digits.length===10){ // likely Indian local
+        return '91'+digits;
+      }
+      if(digits.length>10 && digits.startsWith('0')){
+        // strip leading zeros then
+        digits = digits.replace(/^0+/,'');
+      }
+      // if it already contains country code (>=11 digits) return directly
+      if(digits.length>=11 && digits.length<=15) return digits;
+      return null; // can't sanitize
+    }
+
+    function readFileAsText(file){
+      return new Promise((res,rej)=>{
+        const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error); r.readAsText(file,'UTF-8');
+      })
+    }
+
+    document.getElementById('parseBtn').addEventListener('click', async ()=>{
+      const f=document.getElementById('file').files[0];
+      if(!f){
+        alert('कोई CSV फाइल नहीं मिली — कृपया textarea में नंबर डालें।');
+        return;
+      }
+      try{
+        const txt = await readFileAsText(f);
+        // split lines and commas
+        const items = txt.split(/\r?\n|,/).map(x=>x.trim()).filter(x=>x);
+        const area = document.getElementById('numbers');
+        area.value = area.value + (area.value? '\n':'') + items.join('\n');
+        alert('CSV से नंबर textarea में जोड़ दिए गए हैं।');
+      }catch(e){alert('फाइल पढ़ने में त्रुटि: '+e)}
+    });
+
+    document.getElementById('generateBtn').addEventListener('click', ()=>{
+      const raw = document.getElementById('numbers').value.split(/\r?\n|,/).map(x=>x.trim()).filter(x=>x);
+      const msg = document.getElementById('message').value || '';
+      const linksDiv = document.getElementById('links'); linksDiv.innerHTML='';
+      const links=[]; let skipped=0;
+      raw.forEach(r=>{
+        const s = sanitizeNumber(r);
+        if(!s){ skipped++; return; }
+        const encoded = encodeURIComponent(msg);
+        const link = 'https://wa.me/'+s + (encoded? ('?text='+encoded):'');
+        links.push(link);
+      });
+      if(links.length===0){ alert('कोई वैध नंबर नहीं मिला।'); return; }
+      links.forEach(l=>{
+        const a = document.createElement('a'); a.href=l; a.target='_blank'; a.textContent = l; a.style.display='block'; linksDiv.appendChild(a);
+      });
+      // create downloadable CSV
+      const csv = links.map(x=>('"'+x+'"')).join('\n');
+      const blob = new Blob([csv],{type:'text/csv'});
+      const url = URL.createObjectURL(blob);
+      document.getElementById('downloadBtn').dataset.url=url;
+      document.getElementById('copyBtn').dataset.txt = links.join('\n');
+      alert(''+links.length+' लिंक बनाए गए। '+(skipped? skipped+' अनसैनिटाइज्ड नंबर स्किप हुए':''));
+    });
+
+    document.getElementById('copyBtn').addEventListener('click', ()=>{
+      const txt = document.getElementById('copyBtn').dataset.txt || '';
+      if(!txt){ alert('पहले लिंक जनरेट करें।'); return; }
+      navigator.clipboard.writeText(txt).then(()=>alert('लिंक कॉपी हो गए।')).catch(()=>{alert('कॉपी असफल — मैन्युअली कॉपी करें।')});
+    });
+
+    document.getElementById('downloadBtn').addEventListener('click', (e)=>{
+      const url = e.currentTarget.dataset.url; if(!url){ alert('पहले लिंक जनरेट करें।'); return; }
+      const a=document.createElement('a'); a.href=url; a.download='whatsapp_links.csv'; document.body.appendChild(a); a.click(); a.remove();
+    });
+
+    document.getElementById('openAllBtn').addEventListener('click', ()=>{
+      if(!confirm('सावधान: यह एक साथ कई ब्राउज़र टैब खोलेगा और WhatsApp द्वारा ब्लॉक/लिमिट का कारण बन सकता है. क्या आप जारी रखना चाहते हैं?')) return;
+      const links = Array.from(document.querySelectorAll('#links a')).map(a=>a.href);
+      if(links.length===0){ alert('पहले लिंक बनाइए।'); return; }
+      // open one by one with small delay to avoid overwhelming
+      let i=0;
+      function openNext(){ if(i>=links.length) return; window.open(links[i],'_blank'); i++; setTimeout(openNext,800); }
+      openNext();
+    });
+  </script>
+</body>
+</html>
